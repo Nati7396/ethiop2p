@@ -1,9 +1,10 @@
-const { userQueries, paymentQueries, feedbackQueries } = require('./database');
+const { paymentQueries, feedbackQueries } = require('./database');
 
 const CRYPTOS = ['USDT', 'BTC', 'ETH'];
 const PAYMENT_METHODS = ['Bank', 'Telebirr', 'M-Pesa'];
 
 function getOrCreateUser(ctx) {
+  const { userQueries } = require('./database');
   const tgId = String(ctx.from.id);
   const adminId = process.env.ADMIN_TELEGRAM_ID;
 
@@ -34,7 +35,7 @@ function formatCrypto(crypto, amount) {
 }
 
 function formatETB(amount) {
-  return `${Number(amount).toLocaleString('en-ET', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETB`;
+  return `${Number(amount || 0).toLocaleString('en-ET', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETB`;
 }
 
 function getRepLevel(user) {
@@ -55,18 +56,26 @@ function getPositivePct(user) {
   return `${Math.round((user.positive_trades / user.total_trades) * 100)}%`;
 }
 
+// Build a Telegram profile link for a user
+function profileLink(user) {
+  if (user.username) return `[${escMd(user.name)}](https://t.me/${user.username})`;
+  return `[${escMd(user.name)}](tg://user?id=${user.telegram_id})`;
+}
+
 function formatUserProfile(user) {
+  const { feedbackQueries } = require('./database');
   const reviews = feedbackQueries.getForUser.all(user.id);
-  const reviewText = reviews.length === 0 ? 'No reviews yet.' : reviews.map(r => {
+  const reviewText = reviews.length === 0 ? '_No reviews yet._' : reviews.map(r => {
     const icon = r.rating === 1 ? '✅' : r.rating === -1 ? '❌' : '⚪';
-    return `${icon} ${r.from_name}: ${r.comment || '(no comment)'}`;
+    return `${icon} ${escMd(r.from_name)}: ${escMd(r.comment || '(no comment)')}`;
   }).join('\n');
 
-  return `
-👤 *Profile: ${escMd(user.name)}*
-${user.username ? `@${escMd(user.username)}` : ''}
+  const tgLink = user.username ? `[@${user.username}](https://t.me/${user.username})` : `[Profile](tg://user?id=${user.telegram_id})`;
 
-📊 *Reputation:* ${getRepLevel(user)} ${getStarRating(user)}
+  return `
+👤 *${escMd(user.name)}* ${tgLink}
+
+📊 *Level:* ${getRepLevel(user)} ${getStarRating(user)}
 🔢 *Total Trades:* ${user.total_trades}
 👍 *Positive Rate:* ${getPositivePct(user)}
 💰 *Trade Limit:* ${formatETB(user.trade_limit)} per trade
@@ -80,60 +89,71 @@ ${reviewText}
 function formatAd(ad) {
   const methods = JSON.parse(ad.payment_methods || '[]').join(', ');
   const type = ad.type === 'buy' ? '🟢 BUY' : '🔴 SELL';
-  const pct = ad.total_trades > 0 ? Math.round((ad.reputation / ad.total_trades) * 100) : 0;
-  return `
-${type} *${formatCrypto(ad.crypto, ad.amount)}*
+  const pct = ad.total_trades > 0 ? Math.round((ad.positive_trades || 0) / ad.total_trades * 100) : 0;
+  const traderLink = ad.username ? `[${escMd(ad.name)}](https://t.me/${ad.username})` : `[${escMd(ad.name)}](tg://user?id=${ad.owner_telegram_id || ad.telegram_id})`;
+  return `${type} *${formatCrypto(ad.crypto, ad.amount)}*
 💱 Price: *${formatETB(ad.price_per_unit)}* per ${ad.crypto}
 💵 Total: *${formatETB(ad.amount * ad.price_per_unit)}*
 💳 Payment: ${methods}
-👤 Trader: ${escMd(ad.name)} (${ad.total_trades} trades, ${pct}% positive)
+👤 Trader: ${traderLink} \\(${ad.total_trades} trades, ${pct}% \\+\\)
 ${ad.note ? `📝 Note: ${escMd(ad.note)}` : ''}
-🆔 Ad #${ad.id}
-`.trim();
+🆔 Ad \\#${ad.id}`;
 }
 
 function formatTrade(trade) {
   const statusIcons = {
     pending: '⏳ Pending',
-    buyer_confirmed: '✅ Buyer Confirmed',
+    buyer_confirmed: '✅ Buyer Confirmed — waiting for seller',
     seller_confirmed: '✅ Seller Confirmed',
     completed: '🎉 Completed',
     disputed: '⚠️ Disputed',
     cancelled: '❌ Cancelled',
     expired: '💨 Expired',
   };
-  return `
-🔄 *Trade #${trade.id}*
-💰 ${formatCrypto(trade.crypto, trade.amount)} @ ${formatETB(trade.price_per_unit)}
-💵 Total: *${formatETB(trade.total_etb)}*
-💳 Payment: ${trade.payment_method}
+  return `🔄 *Trade \\#${trade.id}*
+💰 ${escMd(formatCrypto(trade.crypto, trade.amount))} @ ${escMd(formatETB(trade.price_per_unit))}
+💵 Total: *${escMd(formatETB(trade.total_etb))}*
+💳 Payment: ${escMd(trade.payment_method)}
 🛒 Buyer: ${escMd(trade.buyer_name)}
 💰 Seller: ${escMd(trade.seller_name)}
-📊 Status: ${statusIcons[trade.status] || trade.status}
-`.trim();
+📊 Status: ${statusIcons[trade.status] || trade.status}`;
 }
 
 function formatPaymentInfo(info) {
-  if (!info) return 'No payment info set.';
+  if (!info) return '_No payment info set\\._';
   const lines = [];
-  if (info.bank_name) lines.push(`🏦 Bank: ${info.bank_name}\n   Account: ${info.bank_account}\n   Name: ${info.bank_account_name}`);
-  if (info.telebirr_number) lines.push(`📱 Telebirr: ${info.telebirr_number}`);
-  if (info.mpesa_number) lines.push(`📱 M-Pesa: ${info.mpesa_number}`);
-  return lines.length ? lines.join('\n') : 'No payment details saved.';
+  if (info.bank_name) lines.push(`🏦 *Bank:* ${escMd(info.bank_name)}\n   Account: \`${escMd(info.bank_account)}\`\n   Name: ${escMd(info.bank_account_name)}`);
+  if (info.telebirr_number) lines.push(`📱 *Telebirr:* \`${escMd(info.telebirr_number)}\``);
+  if (info.mpesa_number) lines.push(`📱 *M\\-Pesa:* \`${escMd(info.mpesa_number)}\``);
+  return lines.length ? lines.join('\n') : '_No payment details saved\\._';
 }
 
 function escMd(text) {
-  if (!text) return '';
+  if (text === null || text === undefined) return '';
   return String(text).replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
 }
 
+// Persistent bottom keyboard — always visible
+function mainReplyKeyboard() {
+  return {
+    keyboard: [
+      ['📢 Post Ad', '📋 Browse Ads'],
+      ['📁 My Ads', '👤 My Profile'],
+      ['💳 Payment Info', '📊 Stats'],
+    ],
+    resize_keyboard: true,
+    persistent: true,
+  };
+}
+
+// Inline keyboard for main menu (used in messages)
 function mainMenuKeyboard() {
   return {
     inline_keyboard: [
       [{ text: '📋 Browse Ads', callback_data: 'browse_ads' }, { text: '📢 Post Ad', callback_data: 'post_ad' }],
       [{ text: '📁 My Ads', callback_data: 'my_ads' }, { text: '👤 My Profile', callback_data: 'my_profile' }],
       [{ text: '💳 Payment Info', callback_data: 'payment_info' }, { text: '📊 Stats', callback_data: 'stats' }],
-    ]
+    ],
   };
 }
 
@@ -148,10 +168,12 @@ module.exports = {
   getRepLevel,
   getStarRating,
   getPositivePct,
+  profileLink,
   formatUserProfile,
   formatAd,
   formatTrade,
   formatPaymentInfo,
   escMd,
+  mainReplyKeyboard,
   mainMenuKeyboard,
 };

@@ -78,7 +78,8 @@ async function getPriceHint(crypto, userPricePerUnit) {
     const icon = Math.abs(diff) < 2 ? '🟰' : diff > 0 ? '📈' : '📉';
     const etbStr = Number(marketPrice).toLocaleString('en-ET', { maximumFractionDigits: 0 });
 
-    return `${icon} Market: ~${etbStr} ETB/${crypto} \\(your price is ${diffStr}\\)`;
+    // Plain text — caller must use escMd() before inserting into MarkdownV2 messages
+    return `${icon} Market: ~${etbStr} ETB/${crypto} (your price is ${diffStr})`;
   } catch (e) {
     return null;
   }

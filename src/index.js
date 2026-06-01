@@ -75,11 +75,11 @@ async function finishPostAd(ctx, bot, data, note) {
     return ctx.reply('❌ Ad created but could not be fetched\\. Try /myads\\.', { parse_mode: 'MarkdownV2' });
   }
 
-  // Market price hint
+  // Market price hint (plain text → escape for MarkdownV2)
   let marketHint = '';
   try {
     const hint = await getPriceHint(data.crypto, data.price_per_unit);
-    if (hint) marketHint = `\n\n${hint}`;
+    if (hint) marketHint = `\n\n${escMd(hint)}`;
   } catch (_) {}
 
   await ctx.reply(

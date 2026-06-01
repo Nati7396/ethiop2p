@@ -92,11 +92,13 @@ async function handleAdPaymentDone(ctx) {
     return ctx.answerCbQuery('Select at least one payment method!', { show_alert: true });
   }
 
-  // Show market price hint
+  await ctx.answerCbQuery();
+
+  // Show market price hint (plain text → escape for MarkdownV2)
   let marketHint = '';
   try {
     const hint = await getPriceHint(sess.data.crypto, sess.data.price_per_unit);
-    if (hint) marketHint = `\n\n${hint}`;
+    if (hint) marketHint = `\n\n${escMd(hint)}`;
   } catch (_) {}
 
   setSession(ctx.from.id, 'post_ad_note', sess.data);
